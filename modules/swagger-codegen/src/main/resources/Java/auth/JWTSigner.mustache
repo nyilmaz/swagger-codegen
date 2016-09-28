@@ -1,0 +1,81 @@
+{{>licenseInfo}}
+
+package {{invokerPackage}}.auth;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
+import java.security.InvalidKeyException;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.Signature;
+import java.security.SignatureException;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.codec.binary.StringUtils;
+
+{{>generatedAnnotation}}
+public final class JWTSigner {
+
+   private static final Gson GSON = new GsonBuilder().create();
+
+   public static String signUsingRsaSha256(String privateKeyId, String privateKeyPem, String clientEmail,
+                                           String scope, String tokenUrl) {
+
+      Long curSec = System.currentTimeMillis() / 1000;
+
+      Map<String, String> header = new LinkedHashMap<>();
+      header.put("alg", "RS256");
+      header.put("kid", privateKeyId);
+      header.put("typ", "JWT");
+
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("aud", tokenUrl);
+      payload.put("exp", curSec + 3600);
+      payload.put("iat", curSec);
+      payload.put("iss", clientEmail);
+      payload.put("scope", scope);
+
+      try {
+         String encoded =
+             Base64.encodeBase64URLSafeString(GSON.toJson(header).getBytes())
+                                               + "."
+                                               + Base64.encodeBase64URLSafeString(GSON.toJson(payload).getBytes());
+         byte[] encodedUTF8 = StringUtils.getBytesUtf8(encoded);
+         byte[] signature = sign(Signature.getInstance("SHA256withRSA"), privateKeyFromPkcs8(privateKeyPem), encodedUTF8);
+         return encoded + "." + Base64.encodeBase64URLSafeString(signature);
+      } catch (NoSuchAlgorithmException | IOException | SignatureException | InvalidKeyException e) {
+         e.printStackTrace();
+      }
+      return null;
+   }
+
+   private static byte[] sign(Signature algorithm, PrivateKey privateKey, byte[] content) throws SignatureException, InvalidKeyException {
+      algorithm.initSign(privateKey);
+      algorithm.update(content);
+      return algorithm.sign();
+   }
+
+   private static PrivateKey privateKeyFromPkcs8(String privateKeyPem) throws IOException {
+      Reader reader = new StringReader(privateKeyPem);
+      PemReader.Section section = PemReader.readFirstSectionAndClose(reader, "PRIVATE KEY");
+      if (section == null) {
+         throw new IOException("Invalid PKCS8 data.");
+      }
+      byte[] bytes = section.getBase64DecodedBytes();
+      PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(bytes);
+      try {
+         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+         return keyFactory.generatePrivate(keySpec);
+      } catch (NoSuchAlgorithmException | InvalidKeySpecException ignored) {
+      }
+      throw new IOException("Unexpected exception reading PKCS data");
+   }
+
+}
